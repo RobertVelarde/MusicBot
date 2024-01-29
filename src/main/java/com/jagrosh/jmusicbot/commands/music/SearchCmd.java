@@ -96,6 +96,7 @@ public class SearchCmd extends MusicCommand
             m.editMessage(FormatUtil.filter(event.getClient().getSuccess()+" Added **"+track.getInfo().title
                     +"** (`"+FormatUtil.formatTime(track.getDuration())+"`) "+(pos==0 ? "to begin playing" 
                         : " to the queue at position "+pos))).queue();
+            m.delete().queueAfter(10, TimeUnit.SECONDS);
         }
 
         @Override

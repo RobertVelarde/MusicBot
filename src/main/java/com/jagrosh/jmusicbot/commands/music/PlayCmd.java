@@ -70,10 +70,11 @@ public class PlayCmd extends MusicCommand
                 if(DJCommand.checkDJPermission(event))
                 {
                     handler.getPlayer().setPaused(false);
-                    event.replySuccess("Resumed **"+handler.getPlayer().getPlayingTrack().getInfo().title+"**.");
+                    // event.replySuccess("Resumed **"+handler.getPlayer().getPlayingTrack().getInfo().title+"**.");
                 }
-                else
+                else {
                     event.replyError("Only DJs can unpause the player!");
+                }
                 return;
             }
             StringBuilder builder = new StringBuilder(event.getClient().getWarning()+" Play Commands:\n");
@@ -115,8 +116,10 @@ public class PlayCmd extends MusicCommand
             int pos = handler.addTrack(new QueuedTrack(track, event.getAuthor()))+1;
             String addMsg = FormatUtil.filter(event.getClient().getSuccess()+" Added **"+track.getInfo().title
                     +"** (`"+FormatUtil.formatTime(track.getDuration())+"`) "+(pos==0?"to begin playing":" to the queue at position "+pos));
-            if(playlist==null || !event.getSelfMember().hasPermission(event.getTextChannel(), Permission.MESSAGE_ADD_REACTION))
+            if(playlist==null || !event.getSelfMember().hasPermission(event.getTextChannel(), Permission.MESSAGE_ADD_REACTION)) {
                 m.editMessage(addMsg).queue();
+                m.delete().queueAfter(10, TimeUnit.SECONDS);
+            }
             else
             {
                 new ButtonMenu.Builder()
@@ -126,14 +129,18 @@ public class PlayCmd extends MusicCommand
                         .setTimeout(30, TimeUnit.SECONDS)
                         .setAction(re ->
                         {
-                            if(re.getName().equals(LOAD))
+                            if(re.getName().equals(LOAD)) {
                                 m.editMessage(addMsg+"\n"+event.getClient().getSuccess()+" Loaded **"+loadPlaylist(playlist, track)+"** additional tracks!").queue();
-                            else
+                                m.delete().queueAfter(10, TimeUnit.SECONDS);
+                            } else {
                                 m.editMessage(addMsg).queue();
+                                m.delete().queueAfter(10, TimeUnit.SECONDS);
+                            }
                         }).setFinalAction(m ->
                         {
                             try{ m.clearReactions().queue(); }catch(PermissionException ignore) {}
                         }).build().display(m);
+                m.delete().queueAfter(40, TimeUnit.SECONDS);
             }
         }
         

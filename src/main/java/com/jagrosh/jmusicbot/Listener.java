@@ -15,10 +15,12 @@
  */
 package com.jagrosh.jmusicbot;
 
+import com.jagrosh.jmusicbot.audio.AudioHandler;
 import com.jagrosh.jmusicbot.utils.OtherUtil;
 import java.util.concurrent.TimeUnit;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.GuildVoiceState;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.VoiceChannel;
 import net.dv8tion.jda.api.events.ReadyEvent;
@@ -26,6 +28,7 @@ import net.dv8tion.jda.api.events.ShutdownEvent;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
 import net.dv8tion.jda.api.events.message.guild.GuildMessageDeleteEvent;
+import net.dv8tion.jda.api.events.interaction.ButtonClickEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -44,6 +47,34 @@ public class Listener extends ListenerAdapter
         this.bot = bot;
     }
     
+    @Override
+    public void onButtonClick(ButtonClickEvent event) {
+        // Make sure user is in VC with bot
+        VoiceChannel current = event.getGuild().getSelfMember().getVoiceState().getChannel();
+        GuildVoiceState userState = event.getMember().getVoiceState();
+        if(!userState.inVoiceChannel() || (current != null && !userState.getChannel().equals(current))){
+            return;
+        }
+
+        event.deferEdit().queue(); // Acknowledge
+        AudioHandler handler = (AudioHandler)event.getGuild().getAudioManager().getSendingHandler();
+
+        if (event.getComponentId().equals("pause")) {
+            if(!handler.getPlayer().isPaused()) {
+                handler.getPlayer().setPaused(true);
+            }
+        } else if (event.getComponentId().equals("play")) {
+            if(handler.getPlayer().isPaused()) {
+                handler.getPlayer().setPaused(false);
+            }
+        } else if (event.getComponentId().equals("skip")) {
+            handler.getPlayer().stopTrack();
+        } else if (event.getComponentId().equals("stop")) {
+            handler.stopAndClear();
+            event.getGuild().getAudioManager().closeAudioConnection();
+        }
+    }
+
     @Override
     public void onReady(ReadyEvent event) 
     {
