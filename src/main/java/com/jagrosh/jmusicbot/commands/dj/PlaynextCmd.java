@@ -15,6 +15,8 @@
  */
 package com.jagrosh.jmusicbot.commands.dj;
 
+import java.util.concurrent.TimeUnit;
+
 import com.jagrosh.jdautilities.command.CommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.audio.AudioHandler;
@@ -89,6 +91,7 @@ public class PlaynextCmd extends DJCommand
             String addMsg = FormatUtil.filter(event.getClient().getSuccess()+" Added **"+track.getInfo().title
                     +"** (`"+ TimeUtil.formatTime(track.getDuration())+"`) "+(pos==0?"to begin playing":" to the queue at position "+pos));
             m.editMessage(addMsg).queue();
+            m.delete().queueAfter(10, TimeUnit.SECONDS);
         }
         
         @Override

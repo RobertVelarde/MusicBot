@@ -21,6 +21,7 @@ import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.settings.Settings;
 import com.jagrosh.jmusicbot.audio.AudioHandler;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.TextChannel;
 import net.dv8tion.jda.api.entities.VoiceChannel;
 import net.dv8tion.jda.api.exceptions.PermissionException;
@@ -45,14 +46,15 @@ public abstract class MusicCommand extends Command
     @Override
     protected void execute(CommandEvent event) 
     {
+        try 
+        {
+            event.getMessage().delete().queue();
+        } catch(PermissionException ignore){}
+
         Settings settings = event.getClient().getSettingsFor(event.getGuild());
         TextChannel tchannel = settings.getTextChannel(event.getGuild());
         if(tchannel!=null && !event.getTextChannel().equals(tchannel))
         {
-            try 
-            {
-                event.getMessage().delete().queue();
-            } catch(PermissionException ignore){}
             event.replyInDm(event.getClient().getError()+" You can only use that command in "+tchannel.getAsMention()+"!");
             return;
         }
@@ -86,6 +88,15 @@ public abstract class MusicCommand extends Command
                 try 
                 {
                     event.getGuild().getAudioManager().openAudioConnection(userState.getChannel());
+                    AudioHandler handler = (AudioHandler)event.getGuild().getAudioManager().getSendingHandler();
+                    if (!bot.getNowplayingHandler().hasLastNPMessage(event.getGuild())) {
+                        Message m = handler.getNowPlaying(event.getJDA());
+                        if(m == null) {
+                            m = handler.getNoMusicPlaying(event.getJDA());
+                        }
+    
+                        event.reply(m, msg -> bot.getNowplayingHandler().setLastNPMessage(msg));
+                    }
                 }
                 catch(PermissionException ex) 
                 {

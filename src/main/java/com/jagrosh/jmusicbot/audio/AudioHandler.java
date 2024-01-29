@@ -20,6 +20,7 @@ import com.jagrosh.jmusicbot.queue.AbstractQueue;
 import com.jagrosh.jmusicbot.settings.QueueType;
 import com.jagrosh.jmusicbot.utils.TimeUtil;
 import com.jagrosh.jmusicbot.settings.RepeatMode;
+import com.sedmelluq.discord.lavaplayer.filter.equalizer.EqualizerFactory;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
 import com.sedmelluq.discord.lavaplayer.player.event.AudioEventAdapter;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
@@ -41,7 +42,11 @@ import net.dv8tion.jda.api.audio.AudioSendHandler;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.User;
+
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.dv8tion.jda.api.interactions.components.ActionRow;
+import net.dv8tion.jda.api.interactions.components.Button;
 
 /**
  *
@@ -58,17 +63,32 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
     private final Set<String> votes = new HashSet<>();
     
     private final PlayerManager manager;
+    private final EqualizerFactory equalizer;
     private final AudioPlayer audioPlayer;
     private final long guildId;
     
     private AudioFrame lastFrame;
     private AbstractQueue<QueuedTrack> queue;
 
-    protected AudioHandler(PlayerManager manager, Guild guild, AudioPlayer player)
-    {
+    // Now playing
+    private String currentTitle;
+    private EmbedBuilder currentEB;
+    private boolean nowPlayingUpdated;
+    private int prevVolume;
+    private String prevNext;
+
+    protected AudioHandler(PlayerManager manager, Guild guild, AudioPlayer player) {
         this.manager = manager;
+        this.equalizer = new EqualizerFactory();
         this.audioPlayer = player;
+        this.audioPlayer.setFilterFactory(equalizer);
+        this.audioPlayer.setFrameBufferDuration(500); 
         this.guildId = guild.getIdLong();
+        this.currentTitle = null;
+        this.currentEB = new EmbedBuilder();
+        this.nowPlayingUpdated = false;
+        this.prevVolume = -1;
+        this.prevNext = "";
 
         this.setQueueType(manager.getBot().getSettingsManager().getSettings(guildId).getQueueType());
     }
@@ -78,8 +98,7 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         queue = type.createInstance(queue);
     }
 
-    public int addTrackToFront(QueuedTrack qtrack)
-    {
+    public int addTrackToFront(QueuedTrack qtrack) {
         if(audioPlayer.getPlayingTrack()==null)
         {
             audioPlayer.playTrack(qtrack.getTrack());
@@ -124,6 +143,17 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
     public Set<String> getVotes()
     {
         return votes;
+    }
+        
+    public EqualizerFactory getEqualizer()
+    {
+        return equalizer;
+    }
+
+    public void resetEQ()
+    {
+        audioPlayer.setFilterFactory(null);
+        audioPlayer.setFilterFactory(equalizer);
     }
     
     public AudioPlayer getPlayer()
@@ -213,66 +243,191 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         manager.getBot().getNowplayingHandler().onTrackUpdate(track);
     }
 
+    public boolean getNowPlayingUpdated() {
+        return nowPlayingUpdated;
+    }
     
     // Formatting
     public Message getNowPlaying(JDA jda)
     {
-        if(isMusicPlaying(jda))
-        {
-            Guild guild = guild(jda);
-            AudioTrack track = audioPlayer.getPlayingTrack();
-            MessageBuilder mb = new MessageBuilder();
-            mb.append(FormatUtil.filter(manager.getBot().getConfig().getSuccess()+" **Now Playing in "+guild.getSelfMember().getVoiceState().getChannel().getAsMention()+"...**"));
-            EmbedBuilder eb = new EmbedBuilder();
-            eb.setColor(guild.getSelfMember().getColor());
-            RequestMetadata rm = getRequestMetadata();
-            if(rm.getOwner() != 0L)
-            {
-                User u = guild.getJDA().getUserById(rm.user.id);
-                if(u==null)
-                    eb.setAuthor(FormatUtil.formatUsername(rm.user), null, rm.user.avatar);
-                else
-                    eb.setAuthor(FormatUtil.formatUsername(u), null, u.getEffectiveAvatarUrl());
-            }
+        Logger log = LoggerFactory.getLogger("MusicBot");
 
-            try 
-            {
-                eb.setTitle(track.getInfo().title, track.getInfo().uri);
-            }
-            catch(Exception e) 
-            {
-                eb.setTitle(track.getInfo().title);
-            }
-
-            if(track instanceof YoutubeAudioTrack && manager.getBot().getConfig().useNPImages())
-            {
-                eb.setThumbnail("https://img.youtube.com/vi/"+track.getIdentifier()+"/mqdefault.jpg");
-            }
-            
-            if(track.getInfo().author != null && !track.getInfo().author.isEmpty())
-                eb.setFooter("Source: " + track.getInfo().author, null);
-
-            double progress = (double)audioPlayer.getPlayingTrack().getPosition()/track.getDuration();
-            eb.setDescription(getStatusEmoji()
-                    + " "+FormatUtil.progressBar(progress)
-                    + " `[" + TimeUtil.formatTime(track.getPosition()) + "/" + TimeUtil.formatTime(track.getDuration()) + "]` "
-                    + FormatUtil.volumeIcon(audioPlayer.getVolume()));
-            
-            return mb.setEmbeds(eb.build()).build();
+        // Check if music is playing
+        if(!isMusicPlaying(jda)) {
+            return null;
         }
-        else return null;
+
+        Guild guild = guild(jda);
+        AudioTrack track = audioPlayer.getPlayingTrack();
+        MessageBuilder mb = new MessageBuilder();
+        
+        nowPlayingUpdated = true;
+
+        log.info("Track: " + track.getInfo().title);
+        log.info("Current: " + currentTitle);
+
+        // Check if track is different to avoid re-downloading the thumbnail
+        if (!track.getInfo().title.equals(currentTitle)) {
+            // Cache EmbedBuilder
+            currentEB = new EmbedBuilder();
+            currentEB.setColor(guild.getSelfMember().getColor());
+
+            // Cache title
+            currentTitle = track.getInfo().title;
+
+            // Cache Thumbnail
+            //if(track instanceof YoutubeAudioTrack) {
+                currentEB.setImage("https://img.youtube.com/vi/"+track.getIdentifier()+"/mqdefault.jpg");
+            //}
+        }
+
+        // Do not update if we are paused
+        boolean paused = audioPlayer.isPaused();
+        if (paused) {
+            nowPlayingUpdated = false;
+        }
+
+        // Update if the volume has changed
+        int curVolume = audioPlayer.getVolume();
+        if (prevVolume != curVolume) {
+            prevVolume = curVolume;
+            nowPlayingUpdated = true;
+        }
+
+        // Update if up-next has changed
+        String curNext = "";
+        if(!queue.isEmpty()) {
+            curNext = queue.get(0).getTrack().getInfo().title;
+        }
+
+        if (prevNext != curNext) {
+            prevNext = curNext;
+            nowPlayingUpdated = true;
+        }
+
+        // Check if we need to update
+        if (!nowPlayingUpdated) {
+            return mb.setEmbeds(currentEB.build()).build();
+        }
+
+        // Clear all fields
+        currentEB.clearFields();
+
+        // Currently Playing
+        try {
+            currentEB.addField("Currently " + (paused ? "Paused" : "Playing"), "[" + track.getInfo().title + "](" + track.getInfo().uri  + ")", false);
+        } catch(Exception e) {
+            currentEB.addField("Currently " + (paused ? "Paused" : "Playing"), track.getInfo().title, false);
+        }
+
+        // Artist
+        if(track.getInfo().author != null && !track.getInfo().author.isEmpty()) {
+            currentEB.addField("By", track.getInfo().author, false);
+        }
+        
+        // Requested By
+        RequestMetadata rm = getRequestMetadata();
+        if(rm.getOwner() != 0L) {
+            User u = guild.getJDA().getUserById(rm.user.id);
+            if(u == null) {
+                currentEB.addField("Requested By", "<@" + rm.user.id + ">", false);
+            } else {
+                currentEB.addField("Requested By", u.getAsMention(), false);
+            }
+        }
+
+        // Up Next
+        if(!queue.isEmpty())
+        {
+            AudioTrack next = queue.get(0).getTrack();
+            try {
+                currentEB.addField("Next", "[" + curNext + "](" + next.getInfo().uri  + ")", false);
+            } catch(Exception e) {
+                currentEB.addField("Next", curNext, false);
+            }
+        } else {
+            currentEB.addField("Next", "Nothing next in queue", false);
+        }
+
+        // Volume
+        currentEB.addField("Volume", String.valueOf(curVolume) + "%", true);
+
+        // Progress Bar
+        double progress = (double)audioPlayer.getPlayingTrack().getPosition()/track.getDuration();
+        currentEB.addField("", getStatusEmoji()
+                + " "+FormatUtil.progressBar(progress)
+                + " `[" + FormatUtil.formatTime(track.getPosition()) + "/" + FormatUtil.formatTime(track.getDuration()) + "]` "
+                + FormatUtil.volumeIcon(audioPlayer.getVolume()), false);
+        
+        // Buttons
+        Button pauseButton = Button.primary("pause", "Pause");
+        Button playButton = Button.success("play", "Play");
+        Button skipButton = Button.secondary("skip", "Skip");
+        Button stopButton = Button.danger("stop", "Stop");
+        mb.setActionRows(ActionRow.of(pauseButton, playButton, skipButton, stopButton));
+
+        return mb.setEmbeds(currentEB.build()).build();
     }
-    
+
     public Message getNoMusicPlaying(JDA jda)
     {
         Guild guild = guild(jda);
-        return new MessageBuilder()
-                .setContent(FormatUtil.filter(manager.getBot().getConfig().getSuccess()+" **Now Playing...**"))
-                .setEmbeds(new EmbedBuilder()
-                .setTitle("No music playing")
-                .setDescription(STOP_EMOJI+" "+FormatUtil.progressBar(-1)+" "+FormatUtil.volumeIcon(audioPlayer.getVolume()))
-                .setColor(guild.getSelfMember().getColor())
-                .build()).build();
+        MessageBuilder mb = new MessageBuilder();
+
+        nowPlayingUpdated = false;
+
+        // Check if track is different to avoid re-downloading the thumbnail
+        if (!(new String("").equals(currentTitle))) {
+            nowPlayingUpdated = true;
+
+            // Cache EmbedBuilder
+            currentEB = new EmbedBuilder();
+            currentEB.setColor(guild.getSelfMember().getColor());
+
+            // Cache title
+            currentTitle = "";
+
+            // Cache Thumbnail
+            currentEB.setImage("https://img.youtube.com/vi/u8PGSCmXjNw/mqdefault.jpg");
+        }
+
+        // Check if volume has changed
+        int curVolume = audioPlayer.getVolume();
+        if (prevVolume != curVolume) {
+            prevVolume = curVolume;
+            nowPlayingUpdated = true;
+        }
+
+        if (nowPlayingUpdated) {
+            currentEB.clearFields();
+
+            // Currently Playing
+            currentEB.addField("Currently Playing", "", false);
+    
+            // Artist
+            currentEB.addField("By", "", false);
+            
+            // Requested By
+            currentEB.addField("Requested By", "", false);
+    
+            // Up Next
+            currentEB.addField("Next", "", false);
+    
+            // Volume
+            currentEB.addField("Volume", String.valueOf(curVolume) + "%", true);
+    
+            // Progress Bar
+            currentEB.addBlankField(false);
+
+            Button pauseButton = Button.primary("pause", "Pause").asDisabled();
+            Button playButton = Button.success("play", "Play").asDisabled();
+            Button skipButton = Button.secondary("skip", "Skip").asDisabled();
+            Button stopButton = Button.danger("stop", "Stop").asDisabled();
+            mb.setActionRows(ActionRow.of(pauseButton, playButton, skipButton, stopButton));
+        }
+
+        mb.setEmbeds(currentEB.build());
+        return mb.build();
     }
 
     public String getStatusEmoji()
