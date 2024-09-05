@@ -239,10 +239,12 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         AudioTrack track = audioPlayer.getPlayingTrack();
         MessageBuilder mb = new MessageBuilder();
         
-        nowPlayingUpdated = true;
+        nowPlayingUpdated = false;
 
         // Check if track is different to avoid re-downloading the thumbnail
         if (!track.getInfo().title.equals(currentTitle)) {
+            nowPlayingUpdated = true;
+
             // Cache EmbedBuilder
             currentEB = new EmbedBuilder();
             currentEB.setColor(guild.getSelfMember().getColor());
@@ -327,12 +329,12 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         // Volume
         currentEB.addField("Volume", String.valueOf(curVolume) + "%", true);
 
-        // Progress Bar
-        double progress = (double)audioPlayer.getPlayingTrack().getPosition()/track.getDuration();
-        currentEB.addField("", getStatusEmoji()
-                + " "+FormatUtil.progressBar(progress)
-                + " `[" + FormatUtil.formatTime(track.getPosition()) + "/" + FormatUtil.formatTime(track.getDuration()) + "]` "
-                + FormatUtil.volumeIcon(audioPlayer.getVolume()), false);
+        // // Progress Bar
+        // double progress = (double)audioPlayer.getPlayingTrack().getPosition()/track.getDuration();
+        // currentEB.addField("", getStatusEmoji()
+        //         + " "+FormatUtil.progressBar(progress)
+        //         + " `[" + FormatUtil.formatTime(track.getPosition()) + "/" + FormatUtil.formatTime(track.getDuration()) + "]` "
+        //         + FormatUtil.volumeIcon(audioPlayer.getVolume()), false);
         
         // Buttons
         Button pauseButton = Button.primary("pause", "Pause");
@@ -391,8 +393,8 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
             // Volume
             currentEB.addField("Volume", String.valueOf(curVolume) + "%", true);
     
-            // Progress Bar
-            currentEB.addBlankField(false);
+            // // Progress Bar
+            // currentEB.addBlankField(false);
 
             Button pauseButton = Button.primary("pause", "Pause").asDisabled();
             Button playButton = Button.success("play", "Play").asDisabled();
